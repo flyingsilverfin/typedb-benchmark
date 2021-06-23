@@ -101,7 +101,7 @@ public abstract class Simulation<
         while (context.iterationNumber() <= context.iterationMax()) {
             int iter = context.iterationNumber();
             try {
-                Thread.sleep(3000);
+                Thread.sleep(20000);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
