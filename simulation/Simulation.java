@@ -100,6 +100,11 @@ public abstract class Simulation<
         Instant start = Instant.now();
         while (context.iterationNumber() <= context.iterationMax()) {
             int iter = context.iterationNumber();
+            try {
+                Thread.sleep(3000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
             Instant iterStart = Instant.now();
             iterate();
             LOG.info("Iteration {}: {}", iter, printDuration(iterStart, Instant.now()));
