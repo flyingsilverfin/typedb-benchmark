@@ -61,6 +61,7 @@ public abstract class FriendshipAgent<TX extends Transaction> extends Agent<Coun
             LocalDateTime birthDate = context.today().minusYears(context.ageOfFriendship());
             ArrayList<Person> teenagers = matchTeenagers(tx, country, birthDate)
                     .sorted(comparing(Person::email)).collect(toCollection(ArrayList::new));
+            System.out.println("FriendshipAgent.matchTeenagers() found " + teenagers.size() + " people");
             random.randomPairs(teenagers, min(log2(context.scaleFactor()), 1)).forEach(friends -> {
                 Optional<Pair<Person, Person>> inserted = insertFriends(tx, friends.first().email(), friends.second().email());
                 if (context.isReporting()) {
