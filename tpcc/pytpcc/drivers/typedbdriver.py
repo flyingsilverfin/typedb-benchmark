@@ -29,6 +29,7 @@ class EDITION(Enum):
 
 DPW = constants.DISTRICTS_PER_WAREHOUSE
 CPD = constants.CUSTOMERS_PER_DISTRICT
+DATA_COUNT = { }
 
 ## ==============================================
 ## TypeDBDriver
@@ -336,7 +337,12 @@ insert
 $history (customer: $c) isa CUSTOMER_HISTORY,
 has H_DATE {h_date}, has H_AMOUNT {h_amount}, has H_DATA "{h_data}";"""
                     write_query.append(q)
-    
+
+            if tableName not in DATA_COUNT:
+                DATA_COUNT[tableName] = 0;
+            DATA_COUNT[tableName] += len(write_query);
+
+            start_time = time.time()
             for query in write_query:
                 if is_update:
                     tx.query.update(query)
@@ -344,9 +350,10 @@ has H_DATE {h_date}, has H_AMOUNT {h_amount}, has H_DATA "{h_data}";"""
                     tx.query.insert(query)
 
             logging.info("Committing %d queries for type %s" % (len(tuples), tableName))
-            start_time = time.time()
+            commit_start_time = time.time()
             tx.commit()
-            logging.info(f"Committed! Time per query: {(time.time() - start_time) / len(tuples)}")
+            end_time = time.time()
+            logging.info(f"Committed! Total time: {end_time - start_time}, normalised per query (without any concurrency): {(end_time - start_time) / len(tuples)}, query submission time: {commit_start_time - start_time}, commit time: {end_time - commit_start_time}")
         return
 
     ## ----------------------------------------------
@@ -355,6 +362,7 @@ has H_DATE {h_date}, has H_AMOUNT {h_amount}, has H_DATA "{h_data}";"""
     def loadFinish(self):
         logging.info("Closing write session")
         self.session.close()
+        logging.info("Data Count Summary:\n%s" % pformat(DATA_COUNT))
         return None
 
     ## ----------------------------------------------

@@ -359,15 +359,19 @@ has H_DATE {h_date}, has H_AMOUNT {h_amount}, has H_DATA "{h_data}";"""
 
             logging.info("Running %d queries for type %s" % (len(tuples), tableName))
             start_time = time.time()
+            queries = []
             for query in write_query:
                 # NOTE: one query at a time is finished
                 if not DRY_RUN:
-                    tx.query(query).resolve()
+                    # TODO: if we don't store the query apparently on Drop it is automatically resolved?
+                    queries.append(tx.query(query))
 
+            commit_start_time = time.time()
             logging.info("Committing %d queries for type %s" % (len(tuples), tableName))
             if not DRY_RUN:
                 tx.commit()
-            logging.info(f"Committed! Time per query (without any concurrency): {(time.time() - start_time) / len(tuples)}")
+            end_time = time.time()
+            logging.info(f"Committed! Total time: {end_time - start_time}, normalised per query (without any concurrency): {(end_time - start_time) / len(tuples)}, query submission time: {commit_start_time - start_time}, commit time: {end_time - commit_start_time}")
         return
 
     ## ----------------------------------------------
