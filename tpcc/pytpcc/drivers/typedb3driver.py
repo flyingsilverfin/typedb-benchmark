@@ -369,6 +369,8 @@ has H_DATE {h_date}, has H_AMOUNT {h_amount}, has H_DATA "{h_data}";"""
             commit_start_time = time.time()
             logging.info("Committing %d queries for type %s" % (len(tuples), tableName))
             if not DRY_RUN:
+                for q in queries:
+                    q.resolve()
                 tx.commit()
             end_time = time.time()
             logging.info(f"Committed! Total time: {end_time - start_time}, normalised per query (without any concurrency): {(end_time - start_time) / len(tuples)}, query submission time: {commit_start_time - start_time}, commit time: {end_time - commit_start_time}")
@@ -477,12 +479,12 @@ select $w_tax, $d_tax, $d_next_o_id_old, $c_discount, $c_last, $c_credit;"""
 
             # Query: update district's next order id, and create new order
             # q = f"""
-# match 
+# match
 # $d isa DISTRICT, has D_ID {w_id * DPW + d_id}, has D_NEXT_O_ID $d_next_o_id;
 # $c isa CUSTOMER, has C_ID {w_id * DPW * CPD + d_id * CPD + c_id};
-# delete 
+# delete
 # $d_next_o_id of $d;
-# insert 
+# insert
 # $d has D_NEXT_O_ID {d_next_o_id + 1};
 # $order links (district: $d, customer: $c), isa ORDER,
 # has O_ID {d_next_o_id},
@@ -942,7 +944,7 @@ select $d_name, $d_street_1, $d_street_2, $d_city, $d_state, $d_zip;
                 district[0].get('d_zip').as_attribute().get_value(),
             ]
             # UPDATE DISTRICT SET D_YTD = D_YTD + ? WHERE D_W_ID  = ? AND D_ID = ?
-# 
+#
             # q = f"""
 # match
 # $w isa WAREHOUSE, has W_ID {w_id}, has W_YTD $w_ytd;
@@ -953,7 +955,7 @@ select $d_name, $d_street_1, $d_street_2, $d_city, $d_state, $d_zip;
             # self.start_checkpoint(q)
             # tx.query(q).resolve()
             # self.end_checkpoint()
-# 
+#
             # q = f"""
 # match
 # $d isa DISTRICT, has D_ID {w_id * DPW + d_id}, has D_YTD $d_ytd;
@@ -964,7 +966,7 @@ select $d_name, $d_street_1, $d_street_2, $d_city, $d_state, $d_zip;
             # self.start_checkpoint(q)
             # tx.query(q).resolve()
             # self.end_checkpoint()
-# 
+#
             h_data = "%s    %s" % (warehouse_data[0], district_data[0])
 
             # Update customers and history
@@ -1014,7 +1016,7 @@ $h links (customer: $c), isa CUSTOMER_HISTORY, has H_DATE {h_date}, has H_AMOUNT
 
             # q = f"""
 # match
-# $c isa CUSTOMER, has C_ID {c_w_id * DPW * CPD + c_d_id * CPD + c_id}; 
+# $c isa CUSTOMER, has C_ID {c_w_id * DPW * CPD + c_d_id * CPD + c_id};
 # insert
 # $h links (customer: $c), isa CUSTOMER_HISTORY, has H_DATE {h_date}, has H_AMOUNT {h_amount}, has H_DATA "{h_data}";
 # """
