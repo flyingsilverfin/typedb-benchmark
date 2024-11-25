@@ -36,7 +36,7 @@ CPD = constants.CUSTOMERS_PER_DISTRICT
 class TypedbDriver(AbstractDriver):
     DEFAULT_CONFIG = {
         "database": ("Name of DB", "tpcc" ),
-        "addr": ("Address of server", "127.0.0.1:1729" ),
+        "addr": ("Address of server", "127.0.0.1:1730" ),
         "edition": ("TypeDB Edition (Core or Cloud)", "Core" ),
         "user": ("DB User", "admin" ),
         "password": ("DB Password", "password"),
@@ -438,19 +438,19 @@ get $w_tax, $d_tax, $d_next_o_id, $c_discount, $c_last, $c_credit;"""
                 # Query: update district's next order id, and create new order
                 # TODO: experiment with constraining further
                 all_local_int = 1 if all_local else 0
-                q = f"""
-match 
-$d isa DISTRICT, has D_ID {w_id * DPW + d_id}, has D_NEXT_O_ID $d_next_o_id;
-$c isa CUSTOMER, has C_ID {w_id * DPW * CPD + d_id * CPD + c_id};
-delete 
-$d has $d_next_o_id;
-insert 
-$d has D_NEXT_O_ID {d_next_o_id + 1};
-$order (district: $d, customer: $c) isa ORDER,
-has O_ID {d_next_o_id},
-has O_ENTRY_D {o_entry_d}, has O_CARRIER_ID {o_carrier_id},
-has O_OL_CNT {ol_cnt}, has O_ALL_LOCAL {all_local_int}, has O_NEW_ORDER true;"""
-                tx.query.update(q)
+#                 q = f"""
+# match
+# $d isa DISTRICT, has D_ID {w_id * DPW + d_id}, has D_NEXT_O_ID $d_next_o_id;
+# $c isa CUSTOMER, has C_ID {w_id * DPW * CPD + d_id * CPD + c_id};
+# delete
+# $d has $d_next_o_id;
+# insert
+# $d has D_NEXT_O_ID {d_next_o_id + 1};
+# $order (district: $d, customer: $c) isa ORDER,
+# has O_ID {d_next_o_id},
+# has O_ENTRY_D {o_entry_d}, has O_CARRIER_ID {o_carrier_id},
+# has O_OL_CNT {ol_cnt}, has O_ALL_LOCAL {all_local_int}, has O_NEW_ORDER true;"""
+#                 tx.query.update(q)
 
                 for i in range(len(i_ids)):
                     ol_number = i + 1
@@ -501,28 +501,28 @@ get $s_quantity, $s_data, $s_ytd, $s_order_cnt, $s_remote_cnt, $s_dist_xx;"""
                         brand_generic = 'G'
 
                     ol_amount = ol_quantity * i_price
-                    # Query: update stock info of item i
-                    q = f"""
-match
-$i isa ITEM, has I_ID {ol_i_id};
-$w isa WAREHOUSE, has W_ID {ol_supply_w_id};
-$d isa DISTRICT, has D_ID {w_id * DPW + d_id};
-$o (district: $d) isa ORDER, has O_ID {d_next_o_id};
-$s (item: $i, warehouse: $w) isa STOCKING, 
-  has S_QUANTITY $s_quantity, has S_YTD $s_ytd, 
-  has S_ORDER_CNT $s_order_cnt, has S_REMOTE_CNT $s_remote_cnt;
-delete 
-$s has $s_quantity, has $s_ytd, 
-  has $s_order_cnt, has $s_remote_cnt;
-insert 
-$s has S_QUANTITY {s_quantity}, has S_YTD {s_ytd}, 
-  has S_ORDER_CNT {s_order_cnt}, has S_REMOTE_CNT {s_remote_cnt};
-(item: $i, order: $o) isa ORDER_LINE, 
-  has OL_NUMBER {ol_number}, has OL_SUPPLY_W_ID {ol_supply_w_id}, 
-  has OL_DELIVERY_D {o_entry_d}, has OL_QUANTITY {ol_quantity}, 
-  has OL_AMOUNT {ol_amount}, has OL_DIST_INFO "{s_dist_xx}";"""
-                    
-                    tx.query.update(q)
+#                     # Query: update stock info of item i
+#                     q = f"""
+# match
+# $i isa ITEM, has I_ID {ol_i_id};
+# $w isa WAREHOUSE, has W_ID {ol_supply_w_id};
+# $d isa DISTRICT, has D_ID {w_id * DPW + d_id};
+# $o (district: $d) isa ORDER, has O_ID {d_next_o_id};
+# $s (item: $i, warehouse: $w) isa STOCKING,
+#   has S_QUANTITY $s_quantity, has S_YTD $s_ytd,
+#   has S_ORDER_CNT $s_order_cnt, has S_REMOTE_CNT $s_remote_cnt;
+# delete
+# $s has $s_quantity, has $s_ytd,
+#   has $s_order_cnt, has $s_remote_cnt;
+# insert
+# $s has S_QUANTITY {s_quantity}, has S_YTD {s_ytd},
+#   has S_ORDER_CNT {s_order_cnt}, has S_REMOTE_CNT {s_remote_cnt};
+# (item: $i, order: $o) isa ORDER_LINE,
+#   has OL_NUMBER {ol_number}, has OL_SUPPLY_W_ID {ol_supply_w_id},
+#   has OL_DELIVERY_D {o_entry_d}, has OL_QUANTITY {ol_quantity},
+#   has OL_AMOUNT {ol_amount}, has OL_DIST_INFO "{s_dist_xx}";"""
+#
+#                     tx.query.update(q)
 
                     ## Transaction profile states to use "ol_quantity * i_price"
                     total += ol_amount
@@ -589,19 +589,19 @@ sum $ol_quantity;
                     response = tx.query.get_aggregate(q)
                     ol_total = response.resolve().as_value().as_long()
                     
-                    q = f"""
-match
-$c isa CUSTOMER, has C_ID {w_id * DPW * CPD + d_id * CPD + c_id}, has C_BALANCE $c_balance;
-?c_balance_new = $c_balance + {ol_total};
-$o (customer: $c) isa ORDER, has O_ID {no_o_id}, has O_NEW_ORDER $o_new_order, has O_CARRIER_ID $o_carrier_id;
-delete 
-$o has $o_new_order, has $o_carrier_id;
-$c has $c_balance;
-insert 
-$o has O_NEW_ORDER false, has O_CARRIER_ID {o_carrier_id};
-$c has C_BALANCE ?c_balance_new;
-"""
-                    tx.query.update(q)
+#                     q = f"""
+# match
+# $c isa CUSTOMER, has C_ID {w_id * DPW * CPD + d_id * CPD + c_id}, has C_BALANCE $c_balance;
+# ?c_balance_new = $c_balance + {ol_total};
+# $o (customer: $c) isa ORDER, has O_ID {no_o_id}, has O_NEW_ORDER $o_new_order, has O_CARRIER_ID $o_carrier_id;
+# delete
+# $o has $o_new_order, has $o_carrier_id;
+# $c has $c_balance;
+# insert
+# $o has O_NEW_ORDER false, has O_CARRIER_ID {o_carrier_id};
+# $c has C_BALANCE ?c_balance_new;
+# """
+#                     tx.query.update(q)
 
                     q = f"""
 match
@@ -862,67 +862,68 @@ get $d_name, $d_street_1, $d_street_2, $d_city, $d_state, $d_zip;
                     district[0].get('d_zip').as_attribute().get_value(),
                 ]
                 # UPDATE DISTRICT SET D_YTD = D_YTD + ? WHERE D_W_ID  = ? AND D_ID = ?
-
-                q = f"""
-match
-$w isa WAREHOUSE, has W_ID {w_id}, has W_YTD $w_ytd;
-?w_ytd_new = $w_ytd + {h_amount};
-delete $w has $w_ytd;
-insert $w has W_YTD ?w_ytd_new;
-"""
-                tx.query.update(q)
-
-                q = f"""
-match
-$d isa DISTRICT, has D_ID {w_id * DPW + d_id}, has D_YTD $d_ytd;
-?d_ytd_new = $d_ytd + {h_amount};
-delete $d has $d_ytd;
-insert $d has D_YTD ?d_ytd_new;
-"""
-                tx.query.update(q)
-
-                h_data = "%s    %s" % (warehouse_data[0], district_data[0])
-
-                # Update customers and history
-                if customer_data[11] == constants.BAD_CREDIT:
-                    newData = " ".join(map(str, [c_id, c_d_id, c_w_id, d_id, w_id, h_amount]))
-                    c_data = (newData + "|" + c_data)
-                    if len(c_data) > constants.MAX_C_DATA: c_data = c_data[:constants.MAX_C_DATA]
-                    # "updateBCCustomer": "UPDATE CUSTOMER SET C_BALANCE = ?, C_YTD_PAYMENT = ?, C_PAYMENT_CNT = ?, C_DATA = ? WHERE C_W_ID = ? AND C_D_ID = ? AND C_ID = ?", # c_balance, c_ytd_payment, c_payment_cnt, c_data, c_w_id, c_d_id, c_id
-                    q = f"""
-match
-$c isa CUSTOMER, has C_ID {c_w_id * DPW * CPD + c_d_id * CPD + c_id}, 
-has C_BALANCE $c_balance, has C_YTD_PAYMENT $c_ytd_payment, 
-has C_PAYMENT_CNT $c_payment_cnt, has C_DATA $c_data;
-delete $c has $c_balance, has $c_ytd_payment, has $c_payment_cnt, has $c_data;
-insert $c has C_BALANCE {c_balance}, has C_YTD_PAYMENT {c_ytd_payment}, 
-has C_PAYMENT_CNT {c_payment_cnt}, has C_DATA "{c_data}";
-"""
-                    tx.query.update(q)
-                else:
-                    q = f"""
-match
-$c isa CUSTOMER, has C_ID {c_w_id * DPW * CPD + c_d_id * CPD + c_id}, 
-has C_BALANCE $c_balance, has C_YTD_PAYMENT $c_ytd_payment, 
-has C_PAYMENT_CNT $c_payment_cnt;
-delete $c has $c_balance, has $c_ytd_payment, has $c_payment_cnt;
-insert 
-$c has C_BALANCE {c_balance}, has C_YTD_PAYMENT {c_ytd_payment}, 
-has C_PAYMENT_CNT {c_payment_cnt};
-"""
-                    tx.query.update(q)
-
-                # Concatenate w_name, four spaces, d_name
-                # Create the history record
-
-                # TODO: consider keeping track of warehouse w_id as well
-                q = f"""
-match
-$c isa CUSTOMER, has C_ID {c_w_id * DPW * CPD + c_d_id * CPD + c_id}; 
-insert
-$h (customer: $c) isa CUSTOMER_HISTORY, has H_DATE {h_date}, has H_AMOUNT {h_amount}, has H_DATA "{h_data}";
-"""
-                tx.query.insert(q)
+#
+#                 q = f"""
+# match
+# $w isa WAREHOUSE, has W_ID {w_id}, has W_YTD $w_ytd;
+# ?w_ytd_new = $w_ytd + {h_amount};
+# delete $w has $w_ytd;
+# insert $w has W_YTD ?w_ytd_new;
+# """
+#                 tx.query.update(q)
+#
+#                 q = f"""
+# match
+# $d isa DISTRICT, has D_ID {w_id * DPW + d_id}, has D_YTD $d_ytd;
+# ?d_ytd_new = $d_ytd + {h_amount};
+# delete $d has $d_ytd;
+# insert $d has D_YTD ?d_ytd_new;
+# """
+#                 tx.query.update(q)
+#
+#                 h_data = "%s    %s" % (warehouse_data[0], district_data[0])
+#
+#                 # Update customers and history
+#                 if customer_data[11] == constants.BAD_CREDIT:
+#                     newData = " ".join(map(str, [c_id, c_d_id, c_w_id, d_id, w_id, h_amount]))
+#                     c_data = (newData + "|" + c_data)
+#                     if len(c_data) > constants.MAX_C_DATA: c_data = c_data[:constants.MAX_C_DATA]
+#                     # "updateBCCustomer": "UPDATE CUSTOMER SET C_BALANCE = ?, C_YTD_PAYMENT = ?, C_PAYMENT_CNT = ?, C_DATA = ? WHERE C_W_ID = ? AND C_D_ID = ? AND C_ID = ?", # c_balance, c_ytd_payment, c_payment_cnt, c_data, c_w_id, c_d_id, c_id
+#                     q = f"""
+# match
+# $c isa CUSTOMER, has C_ID {c_w_id * DPW * CPD + c_d_id * CPD + c_id},
+# has C_BALANCE $c_balance, has C_YTD_PAYMENT $c_ytd_payment,
+# has C_PAYMENT_CNT $c_payment_cnt, has C_DATA $c_data;
+# delete $c has $c_balance, has $c_ytd_payment, has $c_payment_cnt, has $c_data;
+# insert $c has C_BALANCE {c_balance}, has C_YTD_PAYMENT {c_ytd_payment},
+# has C_PAYMENT_CNT {c_payment_cnt}, has C_DATA "{c_data}";
+# """
+#                     tx.query.update(q)
+#                 else:
+#                     q = f"""
+# match
+# $c isa CUSTOMER, has C_ID {c_w_id * DPW * CPD + c_d_id * CPD + c_id},
+# has C_BALANCE $c_balance, has C_YTD_PAYMENT $c_ytd_payment,
+# has C_PAYMENT_CNT $c_payment_cnt;
+# delete $c has $c_balance, has $c_ytd_payment, has $c_payment_cnt;
+# insert
+# $c has C_BALANCE {c_balance}, has C_YTD_PAYMENT {c_ytd_payment},
+# has C_PAYMENT_CNT {c_payment_cnt};
+# """
+#                     tx.query.update(q)
+#
+#                 # Concatenate w_name, four spaces, d_name
+#                 # Create the history record
+#
+#                 # TODO: consider keeping track of warehouse w_id as well
+#                 q = f"""
+# match
+# $c isa CUSTOMER, has C_ID {c_w_id * DPW * CPD + c_d_id * CPD + c_id};
+# insert
+# $h (customer: $c) isa CUSTOMER_HISTORY, has H_DATE {h_date}, has H_AMOUNT {h_amount}, has H_DATA "{h_data}";
+# """
+#                 if q is not None:
+#                     tx.query.insert(q)
                 tx.commit()
 
                 # TPC-C 2.5.3.3: Must display the following fields:

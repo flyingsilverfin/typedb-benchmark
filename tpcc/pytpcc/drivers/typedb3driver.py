@@ -359,15 +359,21 @@ has H_DATE {h_date}, has H_AMOUNT {h_amount}, has H_DATA "{h_data}";"""
 
             logging.info("Running %d queries for type %s" % (len(tuples), tableName))
             start_time = time.time()
+            queries = []
             for query in write_query:
                 # NOTE: one query at a time is finished
                 if not DRY_RUN:
-                    tx.query(query).resolve()
+                    # TODO: if we don't store the query apparently on Drop it is automatically resolved?
+                    queries.append(tx.query(query))
 
+            commit_start_time = time.time()
             logging.info("Committing %d queries for type %s" % (len(tuples), tableName))
             if not DRY_RUN:
+                for q in queries:
+                    q.resolve()
                 tx.commit()
-            logging.info(f"Committed! Time per query (without any concurrency): {(time.time() - start_time) / len(tuples)}")
+            end_time = time.time()
+            logging.info(f"Committed! Total time: {end_time - start_time}, normalised per query (without any concurrency): {(end_time - start_time) / len(tuples)}, query submission time: {commit_start_time - start_time}, commit time: {end_time - commit_start_time}")
         return
 
     ## ----------------------------------------------
@@ -435,8 +441,10 @@ select $i_name, $i_price, $i_data;"""
                                 'data': item[0].get('i_data').as_attribute().get_value()})
                 break
 
-            # Query: get warhouse, district, and customer info
-            # TODO: potentially remove conditions for speed
+            # Query: get warhouse, district, and customer info, then insert new order
+            all_local_int = 1 if all_local else 0
+            ol_cnt = len(i_ids)
+            o_carrier_id = constants.NULL_CARRIER_ID
             q = f"""
 match 
 $w isa WAREHOUSE, has W_ID {w_id}, has W_TAX $w_tax;
@@ -453,32 +461,28 @@ select $w_tax, $d_tax, $d_next_o_id, $c_discount, $c_last, $c_credit;"""
                 return (None, 0)
             w_tax = general_info[0].get('w_tax').as_attribute().get_value()
             d_tax = general_info[0].get('d_tax').as_attribute().get_value()
-            d_next_o_id = general_info[0].get('d_next_o_id').as_attribute().get_value()
+            d_next_o_id = general_info[0].get('d_next_o_id').get_long()
             c_discount = general_info[0].get('c_discount').as_attribute().get_value()
             c_last = general_info[0].get('c_last').as_attribute().get_value()
             c_credit = general_info[0].get('c_credit').as_attribute().get_value()
 
-            ol_cnt = len(i_ids)
-            o_carrier_id = constants.NULL_CARRIER_ID
 
             # Query: update district's next order id, and create new order
-            # TODO: experiment with constraining further
-            all_local_int = 1 if all_local else 0
-            q = f"""
-match 
-$d isa DISTRICT, has D_ID {w_id * DPW + d_id}, has D_NEXT_O_ID $d_next_o_id;
-$c isa CUSTOMER, has C_ID {w_id * DPW * CPD + d_id * CPD + c_id};
-delete 
-$d_next_o_id of $d;
-insert 
-$d has D_NEXT_O_ID {d_next_o_id + 1};
-$order links (district: $d, customer: $c), isa ORDER,
-has O_ID {d_next_o_id},
-has O_ENTRY_D {o_entry_d}, has O_CARRIER_ID {o_carrier_id},
-has O_OL_CNT {ol_cnt}, has O_ALL_LOCAL {all_local_int}, has O_NEW_ORDER true;"""
-            self.start_checkpoint(q)
-            tx.query(q).resolve()
-            self.end_checkpoint()
+            # q = f"""
+# match
+# $d isa DISTRICT, has D_ID {w_id * DPW + d_id}, has D_NEXT_O_ID $d_next_o_id;
+# $c isa CUSTOMER, has C_ID {w_id * DPW * CPD + d_id * CPD + c_id};
+# delete
+# $d_next_o_id of $d;
+# insert
+# $d has D_NEXT_O_ID {d_next_o_id + 1};
+# $order links (district: $d, customer: $c), isa ORDER,
+# has O_ID {d_next_o_id},
+# has O_ENTRY_D {o_entry_d}, has O_CARRIER_ID {o_carrier_id},
+# has O_OL_CNT {ol_cnt}, has O_ALL_LOCAL {all_local_int}, has O_NEW_ORDER true;"""
+            # self.start_checkpoint(q)
+            # tx.query(q).resolve()
+            # self.end_checkpoint()
 
             for i in range(len(i_ids)):
                 ol_number = i + 1
@@ -531,30 +535,30 @@ select $s_quantity, $s_data, $s_ytd, $s_order_cnt, $s_remote_cnt, $s_dist_xx;"""
                     brand_generic = 'G'
 
                 ol_amount = ol_quantity * i_price
-                # Query: update stock info of item i
-                q = f"""
-match
-$i isa ITEM, has I_ID {ol_i_id};
-$w isa WAREHOUSE, has W_ID {ol_supply_w_id};
-$d isa DISTRICT, has D_ID {w_id * DPW + d_id};
-$o links (district: $d), isa ORDER, has O_ID {d_next_o_id};
-$s links (item: $i, warehouse: $w), isa STOCKING, 
-has S_QUANTITY $s_quantity, has S_YTD $s_ytd, 
-has S_ORDER_CNT $s_order_cnt, has S_REMOTE_CNT $s_remote_cnt;
-delete 
-$s_quantity of $s;
-$s_ytd of $s;
-$s_order_cnt of $s;
-$s_remote_cnt of $s;
-insert 
-$s has S_QUANTITY {s_quantity}, has S_YTD {s_ytd}, 
-has S_ORDER_CNT {s_order_cnt}, has S_REMOTE_CNT {s_remote_cnt};
-(item: $i, order: $o) isa ORDER_LINE, 
-has OL_NUMBER {ol_number}, has OL_SUPPLY_W_ID {ol_supply_w_id}, 
-has OL_QUANTITY {ol_quantity}, has OL_AMOUNT {ol_amount}, has OL_DIST_INFO "{s_dist_xx}";"""
-                self.start_checkpoint(q)
-                tx.query(q).resolve()
-                self.end_checkpoint()
+#                 # Query: update stock info of item i
+#                 q = f"""
+# match
+# $i isa ITEM, has I_ID {ol_i_id};
+# $w isa WAREHOUSE, has W_ID {ol_supply_w_id};
+# $d isa DISTRICT, has D_ID {w_id * DPW + d_id};
+# $o links (district: $d), isa ORDER, has O_ID {d_next_o_id};
+# $s links (item: $i, warehouse: $w), isa STOCKING,
+# has S_QUANTITY $s_quantity, has S_YTD $s_ytd,
+# has S_ORDER_CNT $s_order_cnt, has S_REMOTE_CNT $s_remote_cnt;
+# delete
+# $s_quantity of $s;
+# $s_ytd of $s;
+# $s_order_cnt of $s;
+# $s_remote_cnt of $s;
+# insert
+# $s has S_QUANTITY {s_quantity}, has S_YTD {s_ytd},
+# has S_ORDER_CNT {s_order_cnt}, has S_REMOTE_CNT {s_remote_cnt};
+# (item: $i, order: $o) isa ORDER_LINE,
+# has OL_NUMBER {ol_number}, has OL_SUPPLY_W_ID {ol_supply_w_id},
+# has OL_QUANTITY {ol_quantity}, has OL_AMOUNT {ol_amount}, has OL_DIST_INFO "{s_dist_xx}";"""
+#                 self.start_checkpoint(q)
+#                 tx.query(q).resolve()
+#                 self.end_checkpoint()
 
                 ## Transaction profile states to use "ol_quantity * i_price"
                 total += ol_amount
@@ -623,24 +627,24 @@ reduce $sum = sum($ol_quantity);
                 self.start_checkpoint(q)
                 response = list(tx.query(q).resolve().as_concept_rows())[0]
                 self.end_checkpoint()
-                ol_total = response.get("sum").as_value().as_long()
-                
-                q = f"""
-match
-$c isa CUSTOMER, has C_ID {w_id * DPW * CPD + d_id * CPD + c_id}, has C_BALANCE $c_balance;
-$c_balance_new = $c_balance + {ol_total};
-$o links (customer: $c), isa ORDER, has O_ID {no_o_id}, has O_NEW_ORDER $o_new_order, has O_CARRIER_ID $o_carrier_id;
-delete 
-$o_new_order of $o;
-$o_carrier_id of $o;
-$c_balance of $c;
-insert 
-$o has O_NEW_ORDER false, has O_CARRIER_ID {o_carrier_id};
-$c has C_BALANCE == $c_balance_new;
-"""
-                self.start_checkpoint(q)
-                tx.query(q).resolve()
-                self.end_checkpoint()
+                ol_total = response.get("sum").as_value().get_long()
+#
+#                 q = f"""
+# match
+# $c isa CUSTOMER, has C_ID {w_id * DPW * CPD + d_id * CPD + c_id}, has C_BALANCE $c_balance;
+# $c_balance_new = $c_balance + {ol_total};
+# $o links (customer: $c), isa ORDER, has O_ID {no_o_id}, has O_NEW_ORDER $o_new_order, has O_CARRIER_ID $o_carrier_id;
+# delete
+# $o_new_order of $o;
+# $o_carrier_id of $o;
+# $c_balance of $c;
+# insert
+# $o has O_NEW_ORDER false, has O_CARRIER_ID {o_carrier_id};
+# $c has C_BALANCE == $c_balance_new;
+# """
+#                 self.start_checkpoint(q)
+#                 tx.query(q).resolve()
+#                 self.end_checkpoint()
 
                 q = f"""
 match
@@ -920,83 +924,83 @@ select $d_name, $d_street_1, $d_street_2, $d_city, $d_state, $d_zip;
             ]
             # UPDATE DISTRICT SET D_YTD = D_YTD + ? WHERE D_W_ID  = ? AND D_ID = ?
 
-            q = f"""
-match
-$w isa WAREHOUSE, has W_ID {w_id}, has W_YTD $w_ytd;
-$w_ytd_new = $w_ytd + {h_amount};
-delete $w_ytd of $w;
-insert $w has W_YTD == $w_ytd_new;
-"""
-            self.start_checkpoint(q)
-            tx.query(q).resolve()
-            self.end_checkpoint()
-
-            q = f"""
-match
-$d isa DISTRICT, has D_ID {w_id * DPW + d_id}, has D_YTD $d_ytd;
-$d_ytd_new = $d_ytd + {h_amount};
-delete $d_ytd of $d;
-insert $d has D_YTD == $d_ytd_new;
-"""
-            self.start_checkpoint(q)
-            tx.query(q).resolve()
-            self.end_checkpoint()
-
-            h_data = "%s    %s" % (warehouse_data[0], district_data[0])
-
-            # Update customers and history
-            if customer_data[11] == constants.BAD_CREDIT:
-                newData = " ".join(map(str, [c_id, c_d_id, c_w_id, d_id, w_id, h_amount]))
-                c_data = (newData + "|" + c_data)
-                if len(c_data) > constants.MAX_C_DATA: c_data = c_data[:constants.MAX_C_DATA]
-                # "updateBCCustomer": "UPDATE CUSTOMER SET C_BALANCE = ?, C_YTD_PAYMENT = ?, C_PAYMENT_CNT = ?, C_DATA = ? WHERE C_W_ID = ? AND C_D_ID = ? AND C_ID = ?", # c_balance, c_ytd_payment, c_payment_cnt, c_data, c_w_id, c_d_id, c_id
-                q = f"""
-match
-$c isa CUSTOMER, has C_ID {c_w_id * DPW * CPD + c_d_id * CPD + c_id}, 
-has C_BALANCE $c_balance, has C_YTD_PAYMENT $c_ytd_payment, 
-has C_PAYMENT_CNT $c_payment_cnt, has C_DATA $c_data;
-delete 
-$c_balance of $c; 
-$c_ytd_payment of $c;
-$c_payment_cnt of $c; 
-$c_data of $c;
-insert $c has C_BALANCE {c_balance}, has C_YTD_PAYMENT {c_ytd_payment}, 
-has C_PAYMENT_CNT {c_payment_cnt}, has C_DATA "{c_data}";
-"""
-                self.start_checkpoint(q)
-                tx.query(q).resolve()
-                self.end_checkpoint()
-            else:
-                q = f"""
-match
-$c isa CUSTOMER, has C_ID {c_w_id * DPW * CPD + c_d_id * CPD + c_id}, 
-has C_BALANCE $c_balance, has C_YTD_PAYMENT $c_ytd_payment, 
-has C_PAYMENT_CNT $c_payment_cnt;
-delete 
-$c_balance of $c; 
-$c_ytd_payment of $c;
-$c_payment_cnt of $c;
-insert 
-$c has C_BALANCE {c_balance}, has C_YTD_PAYMENT {c_ytd_payment}, 
-has C_PAYMENT_CNT {c_payment_cnt};
-"""
-                self.start_checkpoint(q)
-                tx.query(q).resolve()
-                self.end_checkpoint()
+#             q = f"""
+# match
+# $w isa WAREHOUSE, has W_ID {w_id}, has W_YTD $w_ytd;
+# $w_ytd_new = $w_ytd + {h_amount};
+# delete $w_ytd of $w;
+# insert $w has W_YTD == $w_ytd_new;
+# """
+#             self.start_checkpoint(q)
+#             tx.query(q).resolve()
+#             self.end_checkpoint()
+#
+#             q = f"""
+# match
+# $d isa DISTRICT, has D_ID {w_id * DPW + d_id}, has D_YTD $d_ytd;
+# $d_ytd_new = $d_ytd + {h_amount};
+# delete $d_ytd of $d;
+# insert $d has D_YTD == $d_ytd_new;
+# """
+#             self.start_checkpoint(q)
+#             tx.query(q).resolve()
+#             self.end_checkpoint()
+#
+#             h_data = "%s    %s" % (warehouse_data[0], district_data[0])
+#
+#             # Update customers and history
+#             if customer_data[11] == constants.BAD_CREDIT:
+#                 newData = " ".join(map(str, [c_id, c_d_id, c_w_id, d_id, w_id, h_amount]))
+#                 c_data = (newData + "|" + c_data)
+#                 if len(c_data) > constants.MAX_C_DATA: c_data = c_data[:constants.MAX_C_DATA]
+#                 # "updateBCCustomer": "UPDATE CUSTOMER SET C_BALANCE = ?, C_YTD_PAYMENT = ?, C_PAYMENT_CNT = ?, C_DATA = ? WHERE C_W_ID = ? AND C_D_ID = ? AND C_ID = ?", # c_balance, c_ytd_payment, c_payment_cnt, c_data, c_w_id, c_d_id, c_id
+#                 q = f"""
+# match
+# $c isa CUSTOMER, has C_ID {c_w_id * DPW * CPD + c_d_id * CPD + c_id},
+# has C_BALANCE $c_balance, has C_YTD_PAYMENT $c_ytd_payment,
+# has C_PAYMENT_CNT $c_payment_cnt, has C_DATA $c_data;
+# delete
+# $c_balance of $c;
+# $c_ytd_payment of $c;
+# $c_payment_cnt of $c;
+# $c_data of $c;
+# insert $c has C_BALANCE {c_balance}, has C_YTD_PAYMENT {c_ytd_payment},
+# has C_PAYMENT_CNT {c_payment_cnt}, has C_DATA "{c_data}";
+# """
+#                 self.start_checkpoint(q)
+#                 tx.query(q).resolve()
+#                 self.end_checkpoint()
+#             else:
+#                 q = f"""
+# match
+# $c isa CUSTOMER, has C_ID {c_w_id * DPW * CPD + c_d_id * CPD + c_id},
+# has C_BALANCE $c_balance, has C_YTD_PAYMENT $c_ytd_payment,
+# has C_PAYMENT_CNT $c_payment_cnt;
+# delete
+# $c_balance of $c;
+# $c_ytd_payment of $c;
+# $c_payment_cnt of $c;
+# insert
+# $c has C_BALANCE {c_balance}, has C_YTD_PAYMENT {c_ytd_payment},
+# has C_PAYMENT_CNT {c_payment_cnt};
+# """
+#                 self.start_checkpoint(q)
+#                 tx.query(q).resolve()
+#                 self.end_checkpoint()
 
             # Concatenate w_name, four spaces, d_name
             # Create the history record
-
-            # TODO: consider keeping track of warehouse w_id as well
-            q = f"""
-match
-$c isa CUSTOMER, has C_ID {c_w_id * DPW * CPD + c_d_id * CPD + c_id}; 
-insert
-$h links (customer: $c), isa CUSTOMER_HISTORY, has H_DATE {h_date}, has H_AMOUNT {h_amount}, has H_DATA "{h_data}";
-"""
-            self.start_checkpoint(q)
-            tx.query(q).resolve()
-            self.end_checkpoint()
+#
+#             # TODO: consider keeping track of warehouse w_id as well
+#             q = f"""
+# match
+# $c isa CUSTOMER, has C_ID {c_w_id * DPW * CPD + c_d_id * CPD + c_id};
+# insert
+# $h links (customer: $c), isa CUSTOMER_HISTORY, has H_DATE {h_date}, has H_AMOUNT {h_amount}, has H_DATA "{h_data}";
+# """
+#             self.start_checkpoint(q)
+#             tx.query(q).resolve()
+#             self.end_checkpoint()
             tx.commit()
 
             # TPC-C 2.5.3.3: Must display the following fields:
@@ -1060,7 +1064,7 @@ reduce $count = count;"""
             # Todo
             first_response = list(tx.query(q).resolve().as_concept_rows())[0]
             self.end_checkpoint()
-            result = first_response.get('count').as_long()
+            result = first_response.get('count').get_long()
             
             tx.commit()
             
